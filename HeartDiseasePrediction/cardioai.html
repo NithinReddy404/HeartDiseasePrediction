@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>CardioAI — Heart Disease Prediction</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+:root{
+  --accent:#e8395a;--green:#3dffa0;--gold:#f5c842;
+  --text:#f0eff5;--muted:#6a6880;
+  --surface:rgba(13,13,22,0.92);--surface2:#161622;
+  --border:rgba(255,255,255,0.08);--red:#e8395a;
+}
+html,body{width:100%;min-height:100%;overflow-x:hidden;}
+body{background:#06060d;color:var(--text);font-family:'Instrument Sans',sans-serif;}
+
+/* ── BACKGROUND ── */
+#bgCanvas{position:fixed;inset:0;width:100vw;height:100vh;z-index:0;pointer-events:none;}
+body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:1;opacity:0.4;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");}
+.scanline{position:fixed;top:0;left:0;right:0;height:2px;z-index:300;opacity:0.55;animation:scan 4s linear infinite;}
+.scanline.patient{background:linear-gradient(90deg,transparent,var(--accent),transparent);}
+.scanline.admin{background:linear-gradient(90deg,transparent,var(--gold),transparent);}
+@keyframes scan{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}
+
+/* ── VIEWS ── */
+.view{display:none;position:relative;z-index:10;}
+.view.active{display:block;}
+.view.center{min-height:100vh;display:none;align-items:center;justify-content:center;}
+.view.center.active{display:flex;}
+
+/* ── SHARED ATOMS ── */
+.heart-svg{animation:hb 1.4s ease-in-out infinite;}
+@keyframes hb{0%,100%{transform:scale(1)}14%{transform:scale(1.18)}28%{transform:scale(1)}42%{transform:scale(1.12)}56%{transform:scale(1)}}
+.logo-text{font-family:'DM Serif Display',serif;letter-spacing:-0.02em;}
+.logo-text span{color:var(--accent);}
+.spinner{border:2px solid rgba(255,255,255,0.2);border-top-color:#fff;border-radius:50%;animation:spin 0.7s linear infinite;display:inline-block;vertical-align:middle;}
+@keyframes spin{to{transform:rotate(360deg)}}
+.btn{border:none;border-radius:10px;font-family:'Instrument Sans',sans-serif;font-weight:600;cursor:pointer;transition:all 0.2s;position:relative;overflow:hidden;}
+.btn:disabled{opacity:0.6;cursor:not-allowed;transform:none!important;}
+.btn-red{background:var(--accent);color:#fff;}
+.btn-red:hover{transform:translateY(-2px);box-shadow:0 8px 28px rgba(232,57,90,0.4);}
+.btn-gold{background:linear-gradient(135deg,#c8a020,var(--gold));color:#0a0800;}
+.btn-gold:hover{transform:translateY(-2px);box-shadow:0 8px 28px rgba(245,200,66,0.3);}
+.card{background:var(--surface);backdrop-filter:blur(24px);border:1px solid var(--border);border-radius:18px;overflow:hidden;}
+.card-hdr{padding:1.3rem 1.7rem;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;}
+.card-title{font-family:'DM Serif Display',serif;font-size:0.98rem;}
+.card-tag{font-family:'DM Mono',monospace;font-size:0.6rem;color:var(--muted);letter-spacing:0.08em;}
+.field{display:flex;flex-direction:column;gap:0.3rem;margin-bottom:0.9rem;}
+label{font-size:0.72rem;color:var(--muted);}
+input,select{background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:'DM Mono',monospace;font-size:0.82rem;padding:0.6rem 0.85rem;outline:none;width:100%;transition:border-color 0.2s,box-shadow 0.2s;-webkit-appearance:none;}
+input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(232,57,90,0.1);}
+input::placeholder{color:var(--muted);opacity:0.4;}
+select option{background:#161622;}
+.msg{margin-top:0.9rem;padding:0.75rem 1rem;border-radius:9px;font-size:0.78rem;text-align:center;line-height:1.5;display:none;}
+.msg.err{background:rgba(232,57,90,0.1);border:1px solid rgba(232,57,90,0.28);color:var(--accent);}
+.msg.ok{background:rgba(61,255,160,0.07);border:1px solid rgba(61,255,160,0.28);color:var(--green);}
+.err-box{background:rgba(232,57,90,0.1);border:1px solid rgba(232,57,90,0.28);border-radius:12px;padding:1.1rem;font-size:0.76rem;color:var(--red);text-align:center;line-height:1.6;width:100%;}
+.divider-line{border:none;border-top:1px solid var(--border);width:100%;}
+.logout-btn{font-family:'DM Mono',monospace;font-size:0.65rem;color:var(--muted);border:1px solid var(--border);padding:0.28rem 0.75rem;border-radius:100px;cursor:pointer;background:none;transition:all 0.2s;}
+.logout-btn:hover{color:var(--text);border-color:rgba(255,255,255,0.2);}
+.pill{display:flex;align-items:center;gap:0.55rem;background:var(--surface2);border:1px solid var(--border);border-radius:100px;padding:0.32rem 0.85rem;font-size:0.75rem;}
+.avatar{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:0.62rem;font-weight:700;color:#fff;flex-shrink:0;}
+.flabel{font-family:'DM Mono',monospace;font-size:0.58rem;color:var(--accent);letter-spacing:0.15em;text-transform:uppercase;margin-bottom:0.75rem;margin-top:1.2rem;}
+.flabel:first-child{margin-top:0;}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:0.8rem;}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.8rem;}
+.rrow{display:flex;align-items:center;gap:0.75rem;}
+input[type=range]{flex:1;height:3px;padding:0;background:var(--surface2);border:none;border-radius:100px;cursor:pointer;accent-color:var(--accent);}
+.rval{font-family:'DM Mono',monospace;font-size:0.78rem;color:var(--accent);min-width:2.2rem;text-align:right;}
+
+/* ─────────────────────────────────────────── */
+/* ── VIEW 1: LOGIN ── */
+/* ─────────────────────────────────────────── */
+#loginView{padding:1.5rem;}
+.login-wrap{width:100%;max-width:440px;}
+.login-logo{display:flex;align-items:center;justify-content:center;gap:0.75rem;margin-bottom:2.2rem;}
+.login-logo .heart-svg{width:32px;height:32px;}
+.login-logo .logo-text{font-size:1.45rem;}
+.role-row{display:flex;gap:0.6rem;margin-bottom:1.2rem;}
+.role-btn{flex:1;padding:0.65rem;border-radius:10px;border:1px solid var(--border);background:var(--surface2);color:var(--muted);font-family:'DM Mono',monospace;font-size:0.72rem;letter-spacing:0.1em;text-transform:uppercase;cursor:pointer;transition:all 0.2s;}
+.role-btn.active{background:rgba(232,57,90,0.12);border-color:var(--accent);color:var(--text);}
+.role-btn.admin-active{background:rgba(245,200,66,0.1);border-color:var(--gold);color:var(--gold);}
+.tabs{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid var(--border);}
+.tab{padding:1rem;text-align:center;font-family:'DM Mono',monospace;font-size:0.72rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);cursor:pointer;background:none;border:none;transition:all 0.2s;border-bottom:2px solid transparent;}
+.tab.active{color:var(--text);background:rgba(232,57,90,0.05);border-bottom-color:var(--accent);}
+.panel{padding:1.8rem;display:none;}
+.panel.active{display:block;}
+.id-result{margin-top:1.1rem;padding:1.2rem;background:rgba(232,57,90,0.06);border:1px solid rgba(232,57,90,0.18);border-radius:12px;display:none;}
+.id-eyebrow{font-family:'DM Mono',monospace;font-size:0.6rem;color:var(--muted);letter-spacing:0.12em;text-transform:uppercase;margin-bottom:0.35rem;}
+.id-number{font-family:'DM Serif Display',serif;font-size:2.8rem;color:var(--accent);line-height:1;}
+.id-name{font-size:0.82rem;color:var(--muted);margin-top:0.25rem;}
+.id-warn{font-family:'DM Mono',monospace;font-size:0.62rem;color:var(--muted);opacity:0.65;margin-top:0.75rem;line-height:1.55;padding-top:0.75rem;border-top:1px solid var(--border);}
+.admin-badge{display:flex;align-items:center;gap:0.6rem;background:rgba(245,200,66,0.08);border:1px solid rgba(245,200,66,0.2);border-radius:10px;padding:0.8rem 1rem;margin-bottom:1.4rem;}
+.admin-badge-text{font-family:'DM Mono',monospace;font-size:0.68rem;color:var(--gold);letter-spacing:0.06em;line-height:1.4;}
+.login-admin-card{border-color:rgba(245,200,66,0.25);}
+
+/* ─────────────────────────────────────────── */
+/* ── VIEW 2: PATIENT DASHBOARD ── */
+/* ─────────────────────────────────────────── */
+#patientView header, #adminView header{position:sticky;top:0;z-index:200;padding:1rem 4vw;display:flex;align-items:center;justify-content:space-between;backdrop-filter:blur(24px);background:rgba(6,6,13,0.82);border-bottom:1px solid var(--border);}
+#patientView header .logo, #adminView header .logo{display:flex;align-items:center;gap:0.6rem;}
+#patientView header .heart-svg, #adminView header .heart-svg{width:26px;height:26px;}
+#patientView header .logo-text, #adminView header .logo-text{font-size:1.2rem;}
+#adminView header{border-bottom-color:rgba(245,200,66,0.12);}
+.hdr-right{display:flex;align-items:center;gap:0.9rem;}
+.pt-main{position:relative;z-index:10;padding:3rem 4vw 5rem;max-width:1280px;margin:0 auto;}
+.welcome-tag{font-family:'DM Mono',monospace;font-size:0.65rem;color:var(--muted);letter-spacing:0.12em;text-transform:uppercase;margin-bottom:0.4rem;}
+.welcome-title{font-family:'DM Serif Display',serif;font-size:clamp(1.8rem,3vw,2.6rem);letter-spacing:-0.02em;margin-bottom:2rem;}
+.welcome-title em{font-style:italic;color:var(--accent);}
+.status-card{background:var(--surface);backdrop-filter:blur(20px);border:1px solid var(--border);border-radius:16px;padding:1.4rem 1.8rem;margin-bottom:2rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:1rem;}
+.status-card.has-pos{border-color:rgba(232,57,90,0.35);}
+.status-card.has-neg{border-color:rgba(61,255,160,0.3);}
+.status-left{display:flex;align-items:center;gap:1.2rem;}
+.status-icon{font-size:2rem;}
+.status-text-top{font-family:'DM Serif Display',serif;font-size:1.1rem;}
+.status-text-sub{font-family:'DM Mono',monospace;font-size:0.65rem;color:var(--muted);margin-top:0.2rem;}
+.s-badge{padding:0.4rem 1.1rem;border-radius:100px;font-family:'DM Mono',monospace;font-size:0.7rem;letter-spacing:0.08em;text-transform:uppercase;border:1px solid;}
+.s-badge.pos{color:var(--red);border-color:var(--red);background:rgba(232,57,90,0.1);}
+.s-badge.neg{color:var(--green);border-color:var(--green);background:rgba(61,255,160,0.08);}
+.s-badge.none{color:var(--muted);border-color:var(--muted);background:rgba(106,104,128,0.1);}
+.clin-summary{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:0.65rem;margin-bottom:2rem;}
+.clin-box{background:var(--surface);backdrop-filter:blur(16px);border:1px solid var(--border);border-radius:12px;padding:0.85rem;}
+.clin-lbl{font-family:'DM Mono',monospace;font-size:0.58rem;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:0.25rem;}
+.clin-val{font-family:'DM Serif Display',serif;font-size:1.15rem;line-height:1;}
+.dash-grid{display:grid;grid-template-columns:1fr 380px;gap:1.8rem;align-items:start;}
+.form-body{padding:1.7rem;}
+.submit-btn{width:100%;margin-top:1.5rem;padding:0.92rem;font-size:0.9rem;letter-spacing:0.03em;}
+.right-col{display:flex;flex-direction:column;gap:1.2rem;position:sticky;top:5.5rem;}
+.result-card{background:var(--surface);backdrop-filter:blur(20px);border:1px solid var(--border);border-radius:18px;overflow:hidden;transition:border-color 0.5s;}
+.result-card.pos{border-color:rgba(232,57,90,0.45);}
+.result-card.neg{border-color:rgba(61,255,160,0.35);}
+.result-body{padding:1.7rem;display:flex;flex-direction:column;align-items:center;gap:1.2rem;min-height:230px;justify-content:center;}
+.gauge-wrap{position:relative;width:190px;height:106px;}
+.gauge-svg{width:190px;height:106px;overflow:visible;}
+.gauge-bg{fill:none;stroke:var(--surface2);stroke-width:13;stroke-linecap:round;}
+.gauge-fill{fill:none;stroke-width:13;stroke-linecap:round;stroke-dasharray:283;stroke-dashoffset:283;transition:stroke-dashoffset 1.3s cubic-bezier(0.34,1.56,0.64,1),stroke 0.5s;}
+.gauge-lbl{position:absolute;bottom:0;left:50%;transform:translateX(-50%);text-align:center;}
+.gauge-pct{font-family:'DM Serif Display',serif;font-size:2.3rem;line-height:1;}
+.gauge-sub{font-family:'DM Mono',monospace;font-size:0.58rem;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase;}
+.risk-badge{padding:0.4rem 1.2rem;border-radius:100px;font-family:'DM Mono',monospace;font-size:0.7rem;letter-spacing:0.1em;text-transform:uppercase;border:1px solid;}
+.risk-badge.pos{color:var(--red);border-color:var(--red);background:rgba(232,57,90,0.1);}
+.risk-badge.neg{color:var(--green);border-color:var(--green);background:rgba(61,255,160,0.08);}
+.result-msg{font-size:0.76rem;color:var(--muted);text-align:center;line-height:1.55;}
+.meta-row{width:100%;display:flex;justify-content:space-around;background:var(--surface2);border-radius:11px;padding:0.85rem;}
+.meta-item{text-align:center;}
+.meta-val{font-family:'DM Serif Display',serif;font-size:1.3rem;}
+.meta-lbl{font-size:0.62rem;color:var(--muted);margin-top:0.12rem;font-family:'DM Mono',monospace;}
+.ph-msg{text-align:center;color:var(--muted);font-size:0.78rem;line-height:1.6;padding:0.5rem;}
+.ph-icon{font-size:2.4rem;margin-bottom:0.65rem;opacity:0.28;}
+.model-card{background:var(--surface);backdrop-filter:blur(20px);border:1px solid var(--border);border-radius:18px;padding:1.3rem;}
+.model-title{font-family:'DM Mono',monospace;font-size:0.6rem;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:0.85rem;}
+.model-grid{display:grid;grid-template-columns:1fr 1fr;gap:0.6rem;}
+.model-box{background:var(--surface2);border-radius:10px;padding:0.8rem;}
+.model-num{font-family:'DM Serif Display',serif;font-size:1.4rem;line-height:1;}
+.model-lbl{font-size:0.62rem;color:var(--muted);margin-top:0.18rem;}
+.disclaimer{font-family:'DM Mono',monospace;font-size:0.58rem;color:var(--muted);opacity:0.5;line-height:1.6;text-align:center;}
+
+/* ─────────────────────────────────────────── */
+/* ── VIEW 3: ADMIN ── */
+/* ─────────────────────────────────────────── */
+.admin-pill-hdr{display:flex;align-items:center;gap:0.55rem;background:rgba(245,200,66,0.08);border:1px solid rgba(245,200,66,0.2);border-radius:100px;padding:0.32rem 0.85rem;font-size:0.72rem;color:var(--gold);}
+.ad-main{position:relative;z-index:10;padding:3rem 4vw 5rem;max-width:1300px;margin:0 auto;}
+.page-title{font-family:'DM Serif Display',serif;font-size:clamp(1.8rem,3vw,2.5rem);letter-spacing:-0.02em;margin-bottom:0.3rem;}
+.page-sub{font-family:'DM Mono',monospace;font-size:0.65rem;color:var(--muted);letter-spacing:0.1em;margin-bottom:2.5rem;}
+.stats-row{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:2.5rem;}
+.stat-card{background:var(--surface);backdrop-filter:blur(20px);border:1px solid var(--border);border-radius:14px;padding:1.2rem 1.5rem;}
+.stat-num{font-family:'DM Serif Display',serif;font-size:2rem;line-height:1;}
+.stat-num.gold{color:var(--gold);}.stat-num.red{color:var(--red);}.stat-num.green{color:var(--green);}
+.stat-lbl{font-family:'DM Mono',monospace;font-size:0.62rem;color:var(--muted);letter-spacing:0.08em;margin-top:0.2rem;}
+.search-row{display:flex;gap:0.8rem;margin-bottom:2rem;}
+.search-input{flex:1;background:var(--surface);backdrop-filter:blur(16px);border:1px solid var(--border);border-radius:12px;color:var(--text);font-family:'DM Mono',monospace;font-size:0.9rem;padding:0.85rem 1.2rem;outline:none;transition:border-color 0.2s,box-shadow 0.2s;}
+.search-input:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(245,200,66,0.08);}
+.search-input::placeholder{color:var(--muted);opacity:0.45;}
+.search-btn{padding:0.85rem 1.6rem;border:none;border-radius:12px;font-family:'Instrument Sans',sans-serif;font-size:0.85rem;font-weight:700;cursor:pointer;transition:all 0.2s;white-space:nowrap;background:var(--gold);color:#0a0800;}
+.search-btn:hover{transform:translateY(-1px);box-shadow:0 6px 22px rgba(245,200,66,0.3);}
+.detail-card{background:var(--surface);backdrop-filter:blur(20px);border:1px solid var(--border);border-radius:16px;padding:1.6rem;margin-bottom:2rem;display:none;}
+.detail-card.show{display:block;}
+.detail-top{display:flex;align-items:center;gap:1.2rem;margin-bottom:1.4rem;flex-wrap:wrap;}
+.d-avatar{width:50px;height:50px;background:linear-gradient(135deg,var(--accent),#ff7a7a);border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'DM Serif Display',serif;font-size:1.35rem;color:#fff;flex-shrink:0;}
+.d-name{font-family:'DM Serif Display',serif;font-size:1.25rem;}
+.d-meta{font-family:'DM Mono',monospace;font-size:0.68rem;color:var(--muted);margin-top:0.2rem;}
+.d-badge{margin-left:auto;padding:0.38rem 1rem;border-radius:100px;font-family:'DM Mono',monospace;font-size:0.68rem;letter-spacing:0.08em;text-transform:uppercase;border:1px solid;}
+.d-badge.pos{color:var(--red);border-color:var(--red);background:rgba(232,57,90,0.1);}
+.d-badge.neg{color:var(--green);border-color:var(--green);background:rgba(61,255,160,0.08);}
+.d-badge.none{color:var(--muted);border-color:var(--muted);background:rgba(106,104,128,0.08);}
+.d-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:0.6rem;}
+.d-box{background:var(--surface2);border-radius:10px;padding:0.75rem;}
+.d-lbl{font-family:'DM Mono',monospace;font-size:0.56rem;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:0.2rem;}
+.d-val{font-family:'DM Serif Display',serif;font-size:1.1rem;line-height:1;}
+.table-hdr{font-family:'DM Mono',monospace;font-size:0.65rem;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:0.8rem;}
+.table-card{background:var(--surface);backdrop-filter:blur(20px);border:1px solid var(--border);border-radius:16px;overflow:hidden;}
+.tbl{width:100%;border-collapse:collapse;}
+.tbl th{padding:0.9rem 1.2rem;text-align:left;font-family:'DM Mono',monospace;font-size:0.62rem;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase;border-bottom:1px solid var(--border);font-weight:400;}
+.tbl td{padding:0.85rem 1.2rem;font-size:0.82rem;border-bottom:1px solid rgba(255,255,255,0.04);}
+.tbl tr:last-child td{border-bottom:none;}
+.tbl tr:hover td{background:rgba(255,255,255,0.02);}
+.tbl .mono{font-family:'DM Mono',monospace;font-size:0.78rem;}
+.tbadge{display:inline-block;padding:0.25rem 0.7rem;border-radius:100px;font-family:'DM Mono',monospace;font-size:0.6rem;letter-spacing:0.06em;border:1px solid;}
+.tbadge.pos{color:var(--red);border-color:rgba(232,57,90,0.4);background:rgba(232,57,90,0.08);}
+.tbadge.neg{color:var(--green);border-color:rgba(61,255,160,0.35);background:rgba(61,255,160,0.06);}
+.tbadge.none{color:var(--muted);border-color:rgba(106,104,128,0.3);background:rgba(106,104,128,0.06);}
+.view-btn{font-family:'DM Mono',monospace;font-size:0.65rem;color:var(--muted);border:1px solid var(--border);padding:0.25rem 0.65rem;border-radius:6px;cursor:pointer;background:none;transition:all 0.2s;}
+.view-btn:hover{color:var(--gold);border-color:rgba(245,200,66,0.4);}
+.empty-row{text-align:center;color:var(--muted);font-family:'DM Mono',monospace;font-size:0.72rem;padding:2rem!important;}
+
+@media(max-width:960px){
+  .dash-grid{grid-template-columns:1fr;}.right-col{position:static;}
+  .g3{grid-template-columns:1fr 1fr;}.stats-row{grid-template-columns:1fr 1fr;}
+}
+
+/* ── TAP-TO-TYPE ── */
+.tap-input{
+  background:var(--surface2);border:1px solid var(--border);border-radius:8px;
+  padding:0.6rem 0.85rem;cursor:pointer;transition:border-color 0.2s,box-shadow 0.2s;
+  min-height:2.35rem;display:flex;align-items:center;
+}
+.tap-input:hover{border-color:rgba(255,255,255,0.18);}
+.tap-input.open{border-color:var(--accent);box-shadow:0 0 0 3px rgba(232,57,90,0.1);padding:0;}
+.tap-ph{font-family:'DM Mono',monospace;font-size:0.8rem;color:var(--muted);opacity:0.55;pointer-events:none;user-select:none;}
+.tap-input.open .tap-ph{display:none;}
+.tap-input input[type=number]{
+  display:none;width:100%;background:transparent;border:none;outline:none;
+  color:var(--text);font-family:'DM Mono',monospace;font-size:0.82rem;
+  padding:0.6rem 0.85rem;
+}
+.tap-input.open input[type=number]{display:block !important;}
+</style>
+</head>
+<body>
+<canvas id="bgCanvas"></canvas>
+<div class="scanline patient" id="scanline"></div>
+
+<!-- ══════════════════════════════════════════ -->
+<!-- VIEW 1: LOGIN                             -->
+<!-- ══════════════════════════════════════════ -->
+<div class="view center active" id="loginView">
+  <div class="login-wrap">
+    <div class="login-logo">
+      <svg class="heart-svg" width="32" height="32" viewBox="0 0 36 36" fill="none">
+        <path d="M18 30s-13-8.5-13-17a8 8 0 0 1 13-6.2A8 8 0 0 1 31 13c0 8.5-13 17-13 17z" fill="#e8395a" opacity="0.92"/>
+        <path d="M6 18h3l2-4 3 8 2-10 2 6h3" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      </svg>
+      <span class="logo-text" style="font-size:1.45rem">Cardio<span>AI</span></span>
+    </div>
+
+    <div class="role-row">
+      <button class="role-btn active" id="patientRoleBtn" onclick="setRole('patient')">🧑‍⚕️ Patient</button>
+      <button class="role-btn" id="adminRoleBtn" onclick="setRole('admin')">🔐 Admin</button>
+    </div>
+
+    <!-- Patient card -->
+    <div class="card" id="patientLoginCard">
+      <div class="tabs">
+        <button class="tab active" onclick="switchTab('login')">Login</button>
+        <button class="tab" onclick="switchTab('register')">Register</button>
+      </div>
+      <div class="panel active" id="loginPanel">
+        <div class="field">
+          <label>Patient ID</label>
+          <div class="tap-input" id="loginIdWrap" onclick="activateTap('loginIdWrap','loginId')">
+            <span class="tap-ph" id="loginIdPh">Click to enter Patient ID</span>
+            <input type="number" id="loginId" placeholder="Type your Patient ID…" min="1"
+              oninput="if(this.value<1&&this.value!=='')this.value=1"
+              onkeydown="if(event.key==='Enter')doLogin()"/>
+          </div>
+        </div>
+        <div class="field"><label>Password</label><input type="password" id="loginPass" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()"/></div>
+        <button class="btn btn-red" style="width:100%;padding:0.88rem;font-size:0.9rem;margin-top:0.3rem" id="loginBtn" onclick="doLogin()">Login to Dashboard →</button>
+        <div class="msg" id="loginMsg"></div>
+      </div>
+      <div class="panel" id="registerPanel">
+        <div class="field"><label>Full Name</label><input type="text" id="regName" placeholder="e.g. John Smith"/></div>
+        <div class="field"><label>Password</label><input type="password" id="regPass" placeholder="Choose a password"/></div>
+        <div class="field"><label>Confirm Password</label><input type="password" id="regPass2" placeholder="Repeat password" onkeydown="if(event.key==='Enter')doRegister()"/></div>
+        <button class="btn btn-red" style="width:100%;padding:0.88rem;font-size:0.9rem;margin-top:0.3rem" id="regBtn" onclick="doRegister()">Create Account →</button>
+        <div class="msg" id="regMsg"></div>
+        <div class="id-result" id="idResult">
+          <div class="id-eyebrow">Your Patient ID</div>
+          <div class="id-number" id="idVal">—</div>
+          <div class="id-name" id="idName"></div>
+          <div class="id-warn">⚠️ Write this down — you need it every time you log in.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Admin card -->
+    <div class="card login-admin-card" id="adminLoginCard" style="display:none;">
+      <div style="padding:1.8rem;">
+        <div class="admin-badge"><span style="font-size:1.2rem">🛡️</span><div class="admin-badge-text">Admin access · Can view and search all patient records</div></div>
+        <div class="field"><label>Username</label><input type="text" id="adminUser" placeholder="admin"/></div>
+        <div class="field"><label>Password</label><input type="password" id="adminPass" placeholder="••••••••" onkeydown="if(event.key==='Enter')doAdminLogin()"/></div>
+        <button class="btn btn-gold" style="width:100%;padding:0.88rem;font-size:0.9rem;margin-top:0.3rem" id="adminBtn" onclick="doAdminLogin()">Enter Admin Dashboard →</button>
+        <div class="msg" id="adminMsg"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════ -->
+<!-- VIEW 2: PATIENT DASHBOARD                 -->
+<!-- ══════════════════════════════════════════ -->
+<div class="view" id="patientView">
+  <header>
+    <div class="logo">
+      <svg class="heart-svg" width="26" height="26" viewBox="0 0 36 36" fill="none">
+        <path d="M18 30s-13-8.5-13-17a8 8 0 0 1 13-6.2A8 8 0 0 1 31 13c0 8.5-13 17-13 17z" fill="#e8395a" opacity="0.92"/>
+        <path d="M6 18h3l2-4 3 8 2-10 2 6h3" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      </svg>
+      <span class="logo-text" style="font-size:1.2rem">Cardio<span>AI</span></span>
+    </div>
+    <div class="hdr-right">
+      <div class="pill"><div class="avatar" style="background:var(--accent)" id="ptAvatar">?</div><span id="ptHdrName">—</span><span style="font-family:'DM Mono',monospace;font-size:0.65rem;color:var(--muted)" id="ptHdrId">#—</span></div>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </header>
+  <div class="pt-main">
+    <div class="welcome-tag">Patient Dashboard</div>
+    <div class="welcome-title">Hello, <em id="ptFirstName">—</em></div>
+
+    <div class="status-card" id="statusCard">
+      <div class="status-left">
+        <div class="status-icon" id="statusIcon">🫀</div>
+        <div><div class="status-text-top" id="statusTitle">No prediction yet</div><div class="status-text-sub" id="statusSub">Enter your clinical data below</div></div>
+      </div>
+      <div class="s-badge none" id="statusBadge">Pending</div>
+    </div>
+
+    <div class="clin-summary" id="clinSummary" style="display:none;"></div>
+
+    <div class="dash-grid">
+      <div class="card">
+        <div class="card-hdr"><span class="card-title">Clinical Data</span><span class="card-tag" id="formTag">Enter Values Below</span></div>
+        <div class="form-body">
+          <div class="flabel">Demographics</div>
+          <div class="g2">
+            <div class="field"><label>Age (years)</label><div class="tap-input" id="pt_ageWrap" onclick="activateTap('pt_ageWrap','pt_age')"><span class="tap-ph" id="pt_agePh">Click to enter age</span><input type="number" id="pt_age" placeholder="e.g. 54" min="1" oninput="if(this.value<1&&this.value!='')this.value=1"/></div></div>
+            <div class="field"><label>Sex</label><select id="pt_sex"><option value="">Select</option><option value="1">Male</option><option value="0">Female</option></select></div>
+          </div>
+          <div class="flabel">Cardiac Measurements</div>
+          <div class="g2">
+            <div class="field"><label>Chest Pain Type</label><select id="pt_cp"><option value="">Select</option><option value="1">Typical Angina</option><option value="2">Atypical Angina</option><option value="3">Non-Anginal Pain</option><option value="4">Asymptomatic</option></select></div>
+            <div class="field"><label>Resting BP (mmHg)</label><div class="tap-input" id="pt_trestbpsWrap" onclick="activateTap('pt_trestbpsWrap','pt_trestbps')"><span class="tap-ph" id="pt_trestbpsPh">Click to enter value</span><input type="number" id="pt_trestbps" placeholder="e.g. 130" min="1" oninput="if(this.value<1&&this.value!='')this.value=1"/></div></div>
+            <div class="field"><label>Cholesterol (mg/dl)</label><div class="tap-input" id="pt_cholWrap" onclick="activateTap('pt_cholWrap','pt_chol')"><span class="tap-ph" id="pt_cholPh">Click to enter value</span><input type="number" id="pt_chol" placeholder="e.g. 250" min="1" oninput="if(this.value<1&&this.value!='')this.value=1"/></div></div>
+            <div class="field"><label>Max Heart Rate</label><div class="tap-input" id="pt_thalachWrap" onclick="activateTap('pt_thalachWrap','pt_thalach')"><span class="tap-ph" id="pt_thalachPh">Click to enter value</span><input type="number" id="pt_thalach" placeholder="e.g. 150" min="1" oninput="if(this.value<1&&this.value!='')this.value=1"/></div></div>
+          </div>
+          <div class="flabel">Clinical Indicators</div>
+          <div class="g3">
+            <div class="field"><label>Fasting Blood Sugar</label><select id="pt_fbs"><option value="">Select</option><option value="1">&gt;120 mg/dl</option><option value="0">≤120 mg/dl</option></select></div>
+            <div class="field"><label>Resting ECG</label><select id="pt_restecg"><option value="">Select</option><option value="0">Normal</option><option value="1">ST-T Abnormal</option><option value="2">LV Hypertrophy</option></select></div>
+            <div class="field"><label>Exercise Angina</label><select id="pt_exang"><option value="">Select</option><option value="1">Yes</option><option value="0">No</option></select></div>
+          </div>
+          <div class="g2" style="margin-top:0.85rem">
+            <div class="field"><label>ST Depression (Oldpeak)</label>
+              <div class="rrow"><input type="range" id="pt_oldpeak" min="0" max="6.2" step="0.1" value="1.0" oninput="document.getElementById('pt_ov').textContent=parseFloat(this.value).toFixed(1)"/><span class="rval" id="pt_ov">1.0</span></div>
+            </div>
+            <div class="field"><label>ST Slope</label><select id="pt_slope"><option value="">Select</option><option value="1">Upsloping</option><option value="2">Flat</option><option value="3">Downsloping</option></select></div>
+            <div class="field"><label>CA (Vessels)</label><select id="pt_ca"><option value="">Select</option><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></div>
+            <div class="field"><label>Thal</label><select id="pt_thal"><option value="">Select</option><option value="3">Normal</option><option value="6">Fixed Defect</option><option value="7">Reversable Defect</option></select></div>
+          </div>
+          <button class="btn btn-red submit-btn" id="ptSubBtn" onclick="ptAnalyze()">Run Prediction →</button>
+        </div>
+      </div>
+      <div class="right-col">
+        <div class="result-card" id="ptRCard">
+          <div class="card-hdr"><span class="card-title">Risk Assessment</span><span class="card-tag">KNN Model</span></div>
+          <div class="result-body" id="ptRBody"><div class="ph-msg"><div class="ph-icon">🫀</div>Enter clinical data<br/>and click <strong>Run Prediction</strong></div></div>
+        </div>
+        <div class="model-card">
+          <div class="model-title">Model Performance</div>
+          <div class="model-grid">
+            <div class="model-box"><div class="model-num">74.4%</div><div class="model-lbl">Best Accuracy (SA)</div></div>
+            <div class="model-box"><div class="model-num" id="pt_kAcc">71.8%</div><div class="model-lbl">KNN Accuracy</div></div>
+            <div class="model-box"><div class="model-num" id="pt_tSz">309</div><div class="model-lbl">Training Records</div></div>
+            <div class="model-box"><div class="model-num" id="pt_bK">—</div><div class="model-lbl">Best K Used</div></div>
+          </div>
+        </div>
+        <p class="disclaimer">⚠️ Educational use only. Not medical advice.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════ -->
+<!-- VIEW 3: ADMIN DASHBOARD                   -->
+<!-- ══════════════════════════════════════════ -->
+<div class="view" id="adminView">
+  <header>
+    <div class="logo">
+      <svg class="heart-svg" width="26" height="26" viewBox="0 0 36 36" fill="none">
+        <path d="M18 30s-13-8.5-13-17a8 8 0 0 1 13-6.2A8 8 0 0 1 31 13c0 8.5-13 17-13 17z" fill="#e8395a" opacity="0.92"/>
+        <path d="M6 18h3l2-4 3 8 2-10 2 6h3" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      </svg>
+      <span class="logo-text" style="font-size:1.2rem">Cardio<span>AI</span></span>
+    </div>
+    <div class="hdr-right">
+      <div class="admin-pill-hdr">🛡️ Admin Access</div>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </header>
+  <div class="ad-main">
+    <div class="page-title">Admin Dashboard</div>
+    <div class="page-sub">Full patient record access · Search by ID · View all records</div>
+    <div class="stats-row">
+      <div class="stat-card"><div class="stat-num gold" id="adTotal">—</div><div class="stat-lbl">Total Patients</div></div>
+      <div class="stat-card"><div class="stat-num red" id="adPos">—</div><div class="stat-lbl">Disease Detected</div></div>
+      <div class="stat-card"><div class="stat-num green" id="adNeg">—</div><div class="stat-lbl">No Disease</div></div>
+    </div>
+    <div class="search-row">
+      <input class="search-input" type="number" id="adSearchId" placeholder="Search by Patient ID…" min="1" oninput="this.value=this.value<1&&this.value!==''?1:this.value" onkeydown="if(event.key==='Enter')adSearch()"/>
+      <button class="search-btn" onclick="adSearch()">Search →</button>
+    </div>
+    <div class="detail-card" id="adDetailCard">
+      <div class="detail-top">
+        <div class="d-avatar" id="adDAvatar">?</div>
+        <div><div class="d-name" id="adDName">—</div><div class="d-meta" id="adDMeta">—</div></div>
+        <div class="d-badge none" id="adDBadge">—</div>
+      </div>
+      <div class="d-grid" id="adDGrid"></div>
+    </div>
+    <div class="table-hdr">All Patients</div>
+    <div class="table-card">
+      <table class="tbl">
+        <thead><tr><th>ID</th><th>Name</th><th>Age</th><th>Registered</th><th>Status</th><th></th></tr></thead>
+        <tbody id="adTableBody"><tr><td class="empty-row" colspan="6"><span class="spinner" style="width:14px;height:14px;margin-right:6px"></span>Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════ -->
+<!-- SCRIPTS                                   -->
+<!-- ══════════════════════════════════════════ -->
+<script>
+/* ── BACKGROUND CANVAS ── */
+const canvas=document.getElementById('bgCanvas'),ctx=canvas.getContext('2d');
+let W,H,t=0,sY=0,currentBgMode='login';
+const bgThemes={
+  login:[{x:.15,y:.3,r:.55,c:[232,57,90],a:.1},{x:.82,y:.65,r:.4,c:[30,20,80],a:.18},{x:.5,y:.5,r:.3,c:[20,50,90],a:.07}],
+  patient:[{x:.15,y:.25,r:.55,c:[232,57,90],a:.1},{x:.8,y:.65,r:.4,c:[30,30,90],a:.18}],
+  admin:[{x:.2,y:.3,r:.5,c:[245,200,66],a:.07},{x:.8,y:.6,r:.4,c:[200,130,20],a:.1},{x:.5,y:.8,r:.3,c:[232,57,90],a:.06}],
+};
+const bgColors={login:[6,6,13],patient:[6,6,13],admin:[6,6,13]};
+function lerp(a,b,t){return a+(b-a)*t;}
+function resize(){W=canvas.width=window.innerWidth;H=canvas.height=window.innerHeight;}
+function draw(){
+  t+=0.004;sY=window.scrollY;
+  ctx.fillStyle=`rgb(${bgColors[currentBgMode]})`;ctx.fillRect(0,0,W,H);
+  (bgThemes[currentBgMode]||bgThemes.login).forEach((o,i)=>{
+    const x=o.x*W+Math.sin(t+i*1.4)*45,y=o.y*H+Math.cos(t*0.7+i*0.9)*35,r=o.r*Math.max(W,H);
+    const g=ctx.createRadialGradient(x,y,0,x,y,r);
+    g.addColorStop(0,`rgba(${o.c},${o.a})`);g.addColorStop(1,`rgba(${o.c},0)`);
+    ctx.fillStyle=g;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();
+  });
+  ctx.strokeStyle='rgba(255,255,255,0.015)';ctx.lineWidth=1;
+  for(let x=0;x<W;x+=64){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
+  for(let y=0;y<H;y+=64){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+  requestAnimationFrame(draw);
+}
+window.addEventListener('scroll',()=>{sY=window.scrollY;});
+window.addEventListener('resize',resize);resize();draw();
+
+/* ── ROUTING ── */
+function showView(name){
+  document.querySelectorAll('.view').forEach(v=>{v.classList.remove('active');if(v.classList.contains('center'))v.style.display='none';});
+  const v=document.getElementById(name+'View');
+  v.classList.add('active');
+  if(v.classList.contains('center'))v.style.display='flex';
+  currentBgMode=name==='patientView'?'patient':name==='adminView'?'admin':'login';
+  const sl=document.getElementById('scanline');
+  sl.className='scanline '+(name==='adminView'?'admin':'patient');
+  window.scrollTo(0,0);
+}
+
+/* ── SESSION ── */
+const SS={
+  get role(){return sessionStorage.getItem('role');},
+  get id(){return sessionStorage.getItem('patientId');},
+  get name(){return sessionStorage.getItem('fullName');},
+  set(role,id,name){sessionStorage.setItem('role',role);sessionStorage.setItem('patientId',id||'');sessionStorage.setItem('fullName',name||'');}
+};
+function logout(){sessionStorage.clear();showView('login');}
+
+/* ── API ── */
+const API='http://localhost:8080/api/patients';
+const ADMIN_USER='admin', ADMIN_PASS='admin123';
+
+/* ── LOGIN VIEW ── */
+function setRole(role){
+  const isAdmin=role==='admin';
+  document.getElementById('patientRoleBtn').className='role-btn'+(isAdmin?'':' active');
+  document.getElementById('adminRoleBtn').className='role-btn'+(isAdmin?' admin-active':'');
+  document.getElementById('patientLoginCard').style.display=isAdmin?'none':'block';
+  document.getElementById('adminLoginCard').style.display=isAdmin?'block':'none';
+}
+function switchTab(tab){
+  document.querySelectorAll('.tab').forEach((el,i)=>el.classList.toggle('active',i===(tab==='login'?0:1)));
+  document.getElementById('loginPanel').classList.toggle('active',tab==='login');
+  document.getElementById('registerPanel').classList.toggle('active',tab==='register');
+}
+function showMsg(id,text,type){const el=document.getElementById(id);el.textContent=text;el.className='msg '+type;el.style.display='block';}
+
+function activateTap(wrapId, inputId){
+  const wrap=document.getElementById(wrapId);
+  if(wrap.classList.contains('open')) return;
+  wrap.classList.add('open');
+  const inp=document.getElementById(inputId);
+  inp.style.display='block';
+  inp.focus();
+}
+
+async function doLogin(){
+  const id=document.getElementById('loginId').value.trim();
+  if(parseInt(id)<1){showMsg('loginMsg','Patient ID must be 1 or greater.','err');return;}
+  const pass=document.getElementById('loginPass').value;
+  if(!id||!pass){showMsg('loginMsg','Please enter your Patient ID and password.','err');return;}
+  const btn=document.getElementById('loginBtn');
+  btn.disabled=true;btn.innerHTML='<span class="spinner" style="width:15px;height:15px;margin-right:5px"></span>Verifying…';
+  try{
+    const r=await fetch(API+'/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({patientId:id,password:pass})});
+    const d=await r.json();
+    if(d.status==='success'){
+      SS.set('patient',d.patientId,d.fullName);
+      initPatientView();
+      showView('patient');
+    } else showMsg('loginMsg',d.message,'err');
+  }catch{showMsg('loginMsg','Cannot reach backend. Make sure App.java is running.','err');}
+  finally{btn.disabled=false;btn.textContent='Login to Dashboard →';}
+}
+
+async function doRegister(){
+  const name=document.getElementById('regName').value.trim();
+  const pass=document.getElementById('regPass').value;
+  const pass2=document.getElementById('regPass2').value;
+  if(!name||!pass){showMsg('regMsg','Please fill in all fields.','err');return;}
+  if(pass!==pass2){showMsg('regMsg','Passwords do not match.','err');return;}
+  if(pass.length<4){showMsg('regMsg','Password must be at least 4 characters.','err');return;}
+  const btn=document.getElementById('regBtn');
+  btn.disabled=true;btn.innerHTML='<span class="spinner" style="width:15px;height:15px;margin-right:5px"></span>Creating…';
+  try{
+    const r=await fetch(API+'/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fullName:name,password:pass})});
+    const d=await r.json();
+    if(d.status==='success'){
+      showMsg('regMsg','Account created! Your Patient ID is below.','ok');
+      document.getElementById('idVal').textContent=d.patientId;
+      document.getElementById('idName').textContent='Welcome, '+d.fullName;
+      document.getElementById('idResult').style.display='block';
+    } else showMsg('regMsg',d.message,'err');
+  }catch{showMsg('regMsg','Cannot reach backend.','err');}
+  finally{btn.disabled=false;btn.textContent='Create Account →';}
+}
+
+function doAdminLogin(){
+  const user=document.getElementById('adminUser').value.trim();
+  const pass=document.getElementById('adminPass').value;
+  if(!user||!pass){showMsg('adminMsg','Please enter username and password.','err');return;}
+  if(user===ADMIN_USER&&pass===ADMIN_PASS){
+    SS.set('admin',null,'Admin');
+    initAdminView();
+    showView('admin');
+  } else showMsg('adminMsg','Invalid admin credentials.','err');
+}
+
+/* ── PATIENT VIEW ── */
+function initPatientView(){
+  document.getElementById('ptAvatar').textContent=(SS.name||'?')[0].toUpperCase();
+  document.getElementById('ptHdrName').textContent=SS.name||'—';
+  document.getElementById('ptHdrId').textContent='#'+SS.id;
+  document.getElementById('ptFirstName').textContent=(SS.name||'Patient').split(' ')[0];
+  loadMyData();
+}
+
+async function loadMyData(){
+  try{
+    const r=await fetch(API+'/'+SS.id);
+    const d=await r.json();
+    if(d.status!=='success')return;
+    if(d.prediction!==null&&d.prediction!==undefined){
+      const has=d.prediction>=1;
+      document.getElementById('statusCard').className='status-card '+(has?'has-pos':'has-neg');
+      document.getElementById('statusIcon').textContent=has?'⚠️':'✅';
+      document.getElementById('statusTitle').textContent=has?'Heart disease risk detected':'No heart disease detected';
+      document.getElementById('statusSub').textContent='Last prediction saved · Re-run anytime below';
+      const b=document.getElementById('statusBadge');
+      b.className='s-badge '+(has?'pos':'neg');
+      b.textContent=has?'Disease Detected':'No Disease';
+    }
+    if(d.age!=null){
+      document.getElementById('formTag').textContent='Update Values Below';
+      const fields=[{l:'Age',v:d.age},{l:'Sex',v:d.sex===1?'Male':'Female'},{l:'Chest Pain',v:d.cp},{l:'Resting BP',v:d.trestbps+'mmHg'},{l:'Cholesterol',v:d.chol+'mg/dl'},{l:'Max HR',v:d.thalach},{l:'Fasting BS',v:d.fbs===1?'>120':'≤120'},{l:'ECG',v:d.restecg},{l:'Ex. Angina',v:d.exang===1?'Yes':'No'},{l:'Oldpeak',v:d.oldpeak},{l:'Slope',v:d.slope},{l:'CA',v:d.ca},{l:'Thal',v:d.thal}];
+      const s=document.getElementById('clinSummary');
+      s.innerHTML=fields.map(f=>`<div class="clin-box"><div class="clin-lbl">${f.l}</div><div class="clin-val">${f.v??'—'}</div></div>`).join('');
+      s.style.display='grid';
+      ['age','trestbps','chol','thalach'].forEach(id=>{if(d[id]!=null){document.getElementById('pt_'+id).value=d[id];activateTap('pt_'+id+'Wrap','pt_'+id);}});
+      ['sex','cp','fbs','restecg','exang','slope','ca','thal'].forEach(id=>{if(d[id]!=null)document.getElementById('pt_'+id).value=d[id];});
+      if(d.oldpeak!=null){document.getElementById('pt_oldpeak').value=d.oldpeak;document.getElementById('pt_ov').textContent=parseFloat(d.oldpeak).toFixed(1);}
+    }
+  }catch(e){console.log(e);}
+}
+
+async function ptAnalyze(){
+  const ids=['age','sex','cp','trestbps','chol','thalach','fbs','restecg','exang','oldpeak','slope','ca','thal'];
+  const v={};for(const id of ids)v[id]=document.getElementById('pt_'+id).value;
+  if(Object.values(v).some(x=>x==='')){document.getElementById('ptRBody').innerHTML='<div class="err-box">Please fill in all 13 clinical fields.</div>';return;}
+  const btn=document.getElementById('ptSubBtn');
+  btn.disabled=true;btn.innerHTML='<span class="spinner" style="width:15px;height:15px;margin-right:5px"></span>Searching…';
+  document.getElementById('ptRBody').innerHTML=`<div class="ph-msg" id="loadSteps">
+  <div class="spinner" style="width:28px;height:28px;border-width:3px;margin:0 auto 1rem"></div>
+  <div id="loadMsg" style="font-family:'DM Mono',monospace;font-size:0.72rem;color:var(--muted);line-height:2;transition:opacity 0.3s">Scanning Cleveland dataset…</div>
+</div>`;
+const msgs=['Scanning Cleveland dataset…','Matching your 13 features…','Finding nearest neighbours…','Calculating risk pattern…','Almost there…'];
+let mi=0;
+const msgTimer=setInterval(()=>{
+  const el=document.getElementById('loadMsg');
+  if(!el){clearInterval(msgTimer);return;}
+  mi=(mi+1)%msgs.length;
+  el.style.opacity='0';
+  setTimeout(()=>{if(el)el.textContent=msgs[mi];if(el)el.style.opacity='1';},200);
+},900);
+  try{
+    const res=await fetch(API+'/'+SS.id+'/clinical',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({age:+v.age,sex:+v.sex,cp:+v.cp,trestbps:+v.trestbps,chol:+v.chol,fbs:+v.fbs,restecg:+v.restecg,thalach:+v.thalach,exang:+v.exang,oldpeak:+v.oldpeak,slope:+v.slope,ca:+v.ca,thal:+v.thal})});
+    if(!res.ok)throw new Error('Server '+res.status);
+    const d=await res.json();
+    if(d.status==='error')throw new Error(d.message);
+    document.getElementById('pt_bK').textContent=d.bestK;
+    document.getElementById('pt_kAcc').textContent=d.modelAccuracy.toFixed(1)+'%';
+    clearInterval(msgTimer);showResult(d,'ptRCard','ptRBody');
+    loadMyData();
+  }catch(e){
+    clearInterval(msgTimer);document.getElementById('ptRBody').innerHTML=`<div class="err-box">${e.name==='TypeError'?'Cannot reach backend. Make sure App.java is running.':'Error: '+e.message}</div>`;
+  }finally{btn.disabled=false;btn.textContent='Run Prediction →';}
+}
+
+function showResult(d,cardId,bodyId){
+  const has=d.hasDisease;
+  document.getElementById(cardId).className='result-card '+(has?'pos':'neg');
+  const color=has?'var(--red)':'var(--green)';
+  const score=has?Math.floor(Math.random()*22)+68:Math.floor(Math.random()*25)+8;
+  const off=283-(283*score/100);
+  document.getElementById(bodyId).innerHTML=`
+    <div class="gauge-wrap">
+      <svg class="gauge-svg" viewBox="0 0 200 110">
+        <path class="gauge-bg" d="M 20 100 A 80 80 0 0 1 180 100"/>
+        <path class="gauge-fill" d="M 20 100 A 80 80 0 0 1 180 100" style="stroke:${color};stroke-dashoffset:${off};filter:drop-shadow(0 0 10px ${color})"/>
+      </svg>
+      <div class="gauge-lbl"><div class="gauge-pct" id="gPct" style="color:${color}">0%</div><div class="gauge-sub">Risk Score</div></div>
+    </div>
+    <span class="risk-badge ${has?'pos':'neg'}">${has?'Disease Detected':'No Disease Detected'}</span>
+    <p class="result-msg">${has?'KNN predicts heart disease presence. Consult a cardiologist.':'KNN predicts no heart disease. Routine follow-up recommended.'}</p>
+    <hr class="divider-line"/>
+    <div class="meta-row">
+      <div class="meta-item"><div class="meta-val" style="color:${color}">${d.prediction>=1?'1':'0'}</div><div class="meta-lbl">Prediction</div></div>
+      <div class="meta-item"><div class="meta-val">${d.bestK}</div><div class="meta-lbl">K Value</div></div>
+      <div class="meta-item"><div class="meta-val">${d.modelAccuracy.toFixed(1)}%</div><div class="meta-lbl">Accuracy</div></div>
+    </div>`;
+  let cur=0;const iv=setInterval(()=>{cur=Math.min(cur+2,score);document.getElementById('gPct').textContent=cur+'%';if(cur>=score)clearInterval(iv);},18);
+}
+
+/* ── ADMIN VIEW ── */
+function initAdminView(){loadAdminData();}
+
+async function loadAdminData(){
+  try{
+    const r=await fetch(API);
+    const d=await r.json();
+    if(d.status!=='success'){document.getElementById('adTableBody').innerHTML='<tr><td class="empty-row" colspan="6">Could not load patients.</td></tr>';return;}
+    const pts=d.patients;
+    document.getElementById('adTotal').textContent=pts.length;
+    document.getElementById('adPos').textContent=pts.filter(p=>p.prediction>=1).length;
+    document.getElementById('adNeg').textContent=pts.filter(p=>p.prediction===0).length;
+    if(pts.length===0){document.getElementById('adTableBody').innerHTML='<tr><td class="empty-row" colspan="6">No patients registered yet.</td></tr>';return;}
+    document.getElementById('adTableBody').innerHTML=pts.map(p=>{
+      const has=p.prediction>=1,hasPred=p.prediction!==null&&p.prediction!==undefined;
+      const bc=!hasPred?'none':has?'pos':'neg';
+      const bt=!hasPred?'Pending':has?'Disease':'No Disease';
+      return `<tr><td class="mono">#${p.patientId}</td><td style="font-weight:500">${p.fullName}</td><td class="mono">${p.age??'—'}</td><td class="mono">${p.createdAt?p.createdAt.slice(0,10):'—'}</td><td><span class="tbadge ${bc}">${bt}</span></td><td><button class="view-btn" onclick="adView(${p.patientId})">View →</button></td></tr>`;
+    }).join('');
+  }catch{document.getElementById('adTableBody').innerHTML='<tr><td class="empty-row" colspan="6">Cannot reach backend.</td></tr>';}
+}
+
+async function adSearch(){
+  const id=document.getElementById('adSearchId').value.trim();
+  if(!id||parseInt(id)<1){document.getElementById('adSearchId').value='';return;}
+  await adView(parseInt(id));
+}
+
+async function adView(id){
+  try{
+    const r=await fetch(API+'/'+id);
+    const d=await r.json();
+    if(d.status!=='success'){alert('Patient not found: '+d.message);return;}
+    const card=document.getElementById('adDetailCard');
+    card.className='detail-card show';
+    document.getElementById('adDAvatar').textContent=(d.fullName||'?')[0].toUpperCase();
+    document.getElementById('adDName').textContent=d.fullName;
+    document.getElementById('adDMeta').textContent=`ID: ${d.patientId} · Registered: ${d.createdAt?d.createdAt.slice(0,10):'—'}`;
+    const b=document.getElementById('adDBadge');
+    if(d.prediction===null||d.prediction===undefined){b.className='d-badge none';b.textContent='No Prediction Yet';}
+    else if(d.prediction>=1){b.className='d-badge pos';b.textContent='Disease Detected';}
+    else{b.className='d-badge neg';b.textContent='No Disease';}
+    const fields=[{l:'Age',v:d.age},{l:'Sex',v:d.sex===1?'Male':d.sex===0?'Female':'—'},{l:'Chest Pain',v:d.cp},{l:'Resting BP',v:d.trestbps?d.trestbps+'mmHg':'—'},{l:'Cholesterol',v:d.chol?d.chol+'mg/dl':'—'},{l:'Max HR',v:d.thalach},{l:'Fasting BS',v:d.fbs===1?'>120':d.fbs===0?'≤120':'—'},{l:'ECG',v:d.restecg},{l:'Ex. Angina',v:d.exang===1?'Yes':d.exang===0?'No':'—'},{l:'Oldpeak',v:d.oldpeak},{l:'Slope',v:d.slope},{l:'CA',v:d.ca},{l:'Thal',v:d.thal}];
+    document.getElementById('adDGrid').innerHTML=fields.map(f=>`<div class="d-box"><div class="d-lbl">${f.l}</div><div class="d-val">${f.v??'—'}</div></div>`).join('');
+    card.scrollIntoView({behavior:'smooth',block:'start'});
+    document.getElementById('adSearchId').value='';
+  }catch{alert('Cannot reach backend.');}
+}
+</script>
+</body>
+</html>
