@@ -1,0 +1,13 @@
+target/
+*.class
+*.jar
+*.war
+model.cache
+.idea/
+*.iml
+*.iws
+*.ipr
+*.log
+.DS_Store
+Thumbs.db
+AI-Based-Disease-Prediction-System-main/
